@@ -807,6 +807,8 @@ function init()
 end
 
 function cleanup()
+  state.playing = false
   if the_lattice then the_lattice:destroy() end
   all_notes_off()
+  clock.cancel_all()
 end
