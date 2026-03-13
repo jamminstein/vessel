@@ -69,6 +69,16 @@ local state = {
 }
 
 -- ─────────────────────────────────────────────────────────
+-- SCREEN STATE (enhancements)
+-- ─────────────────────────────────────────────────────────
+local beat_phase = 0         -- 0.0-1.0, where in the beat
+local voice_activity = {}    -- table of {timestamp=x, lifetime=x} for each voice
+local popup_param = nil      -- "scale", "groove", "density", etc.
+local popup_val = ""         -- display string for popup
+local popup_time = 0         -- remaining time to show popup (0 = hidden)
+local popup_lifetime = 0.8   -- how long to show
+
+-- ─────────────────────────────────────────────────────────
 -- AUDIO FOLLOW MODE
 -- ─────────────────────────────────────────────────────────
 local audio_follow_mode = false
@@ -227,6 +237,100 @@ local function find_midi_device(partial_name)
   return nil
 end
 
+-- ─────────────────────────────────────────────────────────
+-- SCREEN HELPER: Show transient parameter popup
+-- ─────────────────────────────────────────────────────────
+local function show_popup(param_name, value_str)
+  popup_param = param_name
+  popup_val = value_str
+  popup_time = popup_lifetime
+end
+
+-- ─────────────────────────────────────────────────────────
+-- SCREEN HELPER: Record voice activity with timestamp
+-- ─────────────────────────────────────────────────────────
+local function record_voice_activity(voice_id)
+  if not voice_activity[voice_id] then
+    voice_activity[voice_id] = {}
+  end
+  voice_activity[voice_id].timestamp = clock.get_beats()
+  voice_activity[voice_id].lifetime = 0.3  -- decay time in seconds
+end
+
+-- ─────────────────────────────────────────────────────────
+-- SCREEN HELPER: Update voice activity decay
+-- ─────────────────────────────────────────────────────────
+local function update_voice_activity()
+  local now = clock.get_beats()
+  for voice_id, info in pairs(voice_activity) do
+    if info.timestamp then
+      local age = now - info.timestamp
+      if age > info.lifetime then
+        voice_activity[voice_id] = nil
+      end
+    end
+  end
+end
+
+-- ─────────────────────────────────────────────────────────
+-- SCREEN HELPER: Get brightness for a voice (pulsing activity)
+-- ─────────────────────────────────────────────────────────
+local function get_voice_brightness(voice_id)
+  local info = voice_activity[voice_id]
+  if not info or not info.timestamp then
+    return 2
+  end
+  local now = clock.get_beats()
+  local age = now - info.timestamp
+  local progress = age / info.lifetime
+  if progress > 1 then
+    return 2
+  end
+  -- Decay from 15 to 2 over the lifetime
+  return math.floor(15 - (progress * 13) + 2)
+end
+
+-- ─────────────────────────────────────────────────────────
+-- SCREEN HELPER: Get graduated tension bar brightness
+-- ─────────────────────────────────────────────────────────
+local function tension_bar_brightness()
+  if tension.value < 0.35 then
+    return 4
+  elseif tension.value < 0.7 then
+    return 8
+  else
+    return math.min(15, 12 + math.floor(tension.value * 3))
+  end
+end
+
+-- ─────────────────────────────────────────────────────────
+-- SCREEN HELPER: Get beat phase (0-1)
+-- ─────────────────────────────────────────────────────────
+local function update_beat_phase()
+  beat_phase = (clock.get_beats() % 1.0)
+end
+
+-- ─────────────────────────────────────────────────────────
+-- SCREEN HELPER: Beat pulse brightness (subtle pulse)
+-- ─────────────────────────────────────────────────────────
+local function beat_pulse_brightness()
+  local pulse = math.sin(beat_phase * math.pi * 2) * 0.5 + 0.5
+  return math.floor(8 + pulse * 6)
+end
+
+-- ───────────────────────────────────────────────────────
+-- SCREEN HELPER: Current mode name
+-- ───────────────────────────────────────────────────────
+local function get_current_mode()
+  if is_eno() then
+    return "AMBIENT"
+  elseif state.groove_idx == 1 or state.groove_idx == 2 then
+    return "GROOVE"
+  else
+    return "TENSION"
+  end
+end
+
 -- -------------------------------------------------------------------------
 -- MIDI HELPERS
 -- -------------------------------------------------------------------------
@@ -276,6 +380,7 @@ local function play_harm(degree, vel, gate_time, harm_offset)
   -- Melody register rises with tension
   if tension.melody_octave() == 2 then freq = freq * 2 end
   engine.harm_on(0, freq, amp, 0.01, 0.1, 0.7, 0.8, 0.3, 2.0, 2.0, 0, 3000)
+  record_voice_activity("harm")
   clock.run(function()
     clock.sleep(gate_time)
     engine.harm_off(0)
@@ -299,6 +404,7 @@ local function play_bass(degree, vel, gate_time)
   local freq = get_scale_freq(degree, offset) * 0.5
   local amp  = (vel / 127) * 1.1
   engine.bass_on(0, freq, amp, 0.5, 0.4, 0.5)
+  record_voice_activity("bass")
   clock.run(function()
     clock.sleep(gate_time)
     engine.bass_off(0)
@@ -320,6 +426,7 @@ local function play_chord(vel, gate_time)
   if #freqs < 4 then return end
   local amp = (vel / 127) * 0.35
   engine.chord_on(0, freqs[1], freqs[2], freqs[3], freqs[4], amp, 0.08, 2000 + tension.value * 1000)
+  record_voice_activity("chord")
   clock.run(function()
     clock.sleep(gate_time)
     engine.chord_off(0)
@@ -346,6 +453,7 @@ local function play_texture(degree)
   local tex_rate  = is_eno() and (4 + math.random() * 8) or (10 + tension.value * 15)
   local tex_cutoff= is_eno() and (400 + math.random() * 600) or (800 + tension.value * 800)
   engine.texture_on(0, freq, tex_amp, tex_rate, tex_cutoff)
+  record_voice_activity("texture")
   -- OP-XY arp track: slow filter sweep driven by tension
   local sleep_time = is_eno() and 0.8 or 0.4
   local iterations = is_eno() and 16 or 24
@@ -360,6 +468,7 @@ end
 
 local function play_perc(slot, freq, vel, tone, body, decay)
   engine.perc(0, freq, vel/127, tone, body, decay)
+  record_voice_activity("perc_" .. tostring(slot))
   local ch = math.min(4, math.max(1, slot))
   if midi_opz then
     local drum_notes = {36, 38, 42, 47}
@@ -405,7 +514,7 @@ local function build_lattice()
 
       -- The ONE (James Brown): beat 1 of each bar
       if beat_count % 4 == 1 then
-        -- ENO: occasional slow drone bass instead of rhythmic pulse
+        -- ENO: occasional slow drone bass instead of rhythmic bass pulse
         if is_eno() then
           if math.random() < 0.28 then
             play_bass(math.random(1, 3), 42 + math.floor(tension.value * 12), 2.0)
@@ -716,85 +825,155 @@ local function redraw()
   oracle.update()
   oracle.draw()
 
-  -- Top bar
-  screen.level(15)
+  -- Update beat phase and voice activity
+  update_beat_phase()
+  update_voice_activity()
+  
+  -- Decay popup timer
+  if popup_time > 0 then
+    popup_time = popup_time - (1/30)
+  end
+
+  -- ─────────────────────────────────────────────────────────
+  -- STATUS STRIP (y 0-8)
+  -- ─────────────────────────────────────────────────────────
+  
+  -- VESSEL title at level 4, top-left
+  screen.level(4)
   screen.font_size(8)
   screen.move(2, 8)
   screen.text("VESSEL")
 
-  screen.level(state.playing and 12 or 5)
+  -- Current mode at level 8, center
+  screen.level(8)
   screen.move(52, 8)
-  screen.text(state.playing and "▶" or "■")
+  screen.text(get_current_mode())
 
-  -- Tension bar (top right)
+  -- Beat pulse indicator at x=124, level variable
+  screen.level(beat_pulse_brightness())
+  screen.move(120, 8)
+  screen.text("●")
+
+  -- ─────────────────────────────────────────────────────────
+  -- LIVE ZONE (y 10-28): Enhanced with voice activity + tension bar
+  -- ─────────────────────────────────────────────────────────
+  
+  -- Voice activity meters (simple vertical bars per voice)
+  local voice_positions = {
+    harm    = 10,
+    bass    = 25,
+    chord   = 40,
+    texture = 55,
+    perc_1  = 70,
+    perc_2  = 85,
+  }
+  
+  for voice_id, x_pos in pairs(voice_positions) do
+    local brightness = get_voice_brightness(voice_id)
+    screen.level(brightness)
+    screen.rect(x_pos, 12, 8, 12)
+    screen.fill()
+    -- Label
+    screen.level(3)
+    screen.font_size(7)
+    screen.move(x_pos - 2, 26)
+    if voice_id == "harm" then
+      screen.text("h")
+    elseif voice_id == "bass" then
+      screen.text("b")
+    elseif voice_id == "chord" then
+      screen.text("c")
+    elseif voice_id == "texture" then
+      screen.text("t")
+    else
+      screen.text("p")
+    end
+  end
+
+  -- Tension bar with graduated brightness (y 28-32)
+  screen.level(tension_bar_brightness())
+  local tension_width = math.floor(tension.value * 100)
+  screen.rect(2, 30, tension_width, 4)
+  screen.fill()
   screen.level(3)
-  screen.move(70, 5)
-  screen.text("T")
-  screen.level(math.floor(3 + tension.value * 12))
-  screen.rect(78, 2, tension.bar_width(), 5)
+  screen.rect(2, 30, 100, 4)
+  screen.stroke()
+
+  -- Audio follow indicator (simple level meter when active)
+  if audio_follow_mode then
+    screen.level(6)
+    screen.move(2, 37)
+    screen.text("AFW")
+    screen.level(math.floor(6 + audio_level_current * 4))
+    local audio_width = math.floor(audio_level_current * 20)
+    screen.rect(20, 36, audio_width, 4)
+    screen.fill()
+  end
+
+  -- ─────────────────────────────────────────────────────────
+  -- MORPH PREVIEW (y 38-48): Spatial A↔B visualization
+  -- ─────────────────────────────────────────────────────────
+  
+  screen.font_size(8)
+  screen.level(math.floor(4 + (1 - preset_morph_amount) * 10))
+  screen.move(2, 48)
+  screen.text("A")
+
+  screen.level(math.floor(4 + preset_morph_amount * 10))
+  screen.move(112, 48)
+  screen.text("B")
+
+  -- Morph blend bar
+  screen.level(5)
+  screen.rect(12, 43, 100, 3)
+  screen.stroke()
+  local morph_pos = 12 + (preset_morph_amount * 100)
+  screen.level(10)
+  screen.rect(morph_pos - 2, 42, 4, 5)
   screen.fill()
 
-  -- Audio follow indicator
-  if audio_follow_mode then
-    screen.level(math.floor(3 + audio_level_current * 12))
-    screen.move(70, 15)
-    screen.text("A")
-  end
+  -- ─────────────────────────────────────────────────────────
+  -- CONTEXT BAR (y 53-62): BPM, tension, mode, MIDI
+  -- ─────────────────────────────────────────────────────────
+  
+  -- BPM at level 6
+  screen.level(6)
+  screen.font_size(7)
+  screen.move(2, 56)
+  local bpm = clock.get_tempo()
+  screen.text(string.format("BPM %.0f", bpm))
 
-  -- Preset morph indicator
-  screen.level(4)
-  screen.move(70, 22)
-  local morph_label = "A"
-  if preset_morph_amount > 0.1 and preset_morph_amount < 0.9 then
-    morph_label = string.format("%.0f%%", preset_morph_amount * 100)
-  elseif preset_morph_amount >= 0.9 then
-    morph_label = "B"
-  end
-  screen.text(morph_label)
-
-  -- Current scale + root (bottom left)
-  screen.level(9)
-  screen.font_size(8)
-  screen.move(2, 54)
-  screen.text(scale_names[state.scale_idx] or "?")
-
-  screen.level(5)
+  -- Tension value at level 8
+  screen.level(8)
   screen.move(2, 63)
-  screen.text(musicutil.note_num_to_name(state.root_note, true))
+  screen.text(string.format("T %.2f", tension.value))
 
-  -- Groove + chord (bottom right)
-  if is_eno() then
-    screen.level(10)
-    screen.move(80, 54)
-    screen.text("eno ~")
-    screen.level(3)
-    screen.move(80, 63)
-    screen.text("ambient")
-  else
-    screen.level(7)
-    screen.move(80, 54)
-    screen.text(groove_names[state.groove_idx] or "?")
-    screen.level(4)
-    screen.move(80, 63)
-    screen.text(chord_names[state.chord_idx] or "?")
-  end
+  -- Mode at level 5
+  screen.level(5)
+  screen.move(50, 56)
+  screen.text(get_current_mode())
 
-  -- Phase indicator (hidden in ENO)
-  if not is_eno() then
-    local phase, pos = cr:peek()
-    screen.level(phase == "call" and 8 or 4)
-    screen.move(110, 8)
-    screen.text(phase == "call" and "C" or "R")
-  end
-
-  -- Devices connected
-  screen.level(3)
-  screen.move(2, 44)
+  -- MIDI info at level 4
+  screen.level(4)
+  screen.move(50, 63)
   screen.text(
     (midi_opxy and "XY" or "--") .. " " ..
     (midi_opz  and "OZ" or "--") .. " " ..
     (midi_op1  and "O1" or "--")
   )
+
+  -- ─────────────────────────────────────────────────────────
+  -- TRANSIENT PARAMETER POPUP (0.8s at level 15)
+  -- ─────────────────────────────────────────────────────────
+  
+  if popup_time > 0 then
+    screen.level(15)
+    screen.font_size(8)
+    screen.move(40, 55)
+    screen.text(popup_param or "")
+    screen.move(40, 62)
+    screen.text(popup_val or "")
+  end
 
   screen.update()
 end
@@ -802,7 +981,7 @@ end
 local function start_redraw_clocks()
   clock.run(function()
     while true do
-      clock.sleep(1/20)
+      clock.sleep(1/30)
       tension.update()
       audio_follow_tick()
       morph_tick()
@@ -830,8 +1009,10 @@ function enc(n, d)
   if state.key1_down then
     if n == 1 then
       state.root_note = util.clamp(state.root_note + d, 24, 72)
+      show_popup("root", musicutil.note_num_to_name(state.root_note, true))
     elseif n == 2 then
       state.chord_idx = util.clamp(state.chord_idx + d, 1, #chord_names)
+      show_popup("chord", chord_names[state.chord_idx])
     elseif n == 3 then
       -- Morph between presets A and B
       if d > 0 then
@@ -839,13 +1020,16 @@ function enc(n, d)
       else
         start_morph_to_a()
       end
+      show_popup("morph", string.format("%.0f%%", preset_morph_amount * 100))
     end
   else
     if n == 1 then
       state.scale_idx = util.clamp(state.scale_idx + d, 1, #scale_names)
+      show_popup("scale", scale_names[state.scale_idx])
     elseif n == 2 then
       state.groove_idx = util.clamp(state.groove_idx + d, 1, #groove_names)
       build_groove_stack()
+      show_popup("groove", groove_names[state.groove_idx])
       if is_eno() then
         state.reverb  = 0.55
         state.density = 0.12
@@ -856,6 +1040,7 @@ function enc(n, d)
     elseif n == 3 then
       state.density = util.clamp(state.density + d * 0.03, 0.05, 1.0)
       build_groove_stack()
+      show_popup("density", string.format("%.0f%%", state.density * 100))
     end
   end
   state.screen_dirty = true
@@ -869,6 +1054,7 @@ function key(n, z)
   elseif n == 2 and z == 1 then
     if state.key1_down then
       save_preset_a()
+      show_popup("preset", "A saved")
     else
       state.playing = not state.playing
       if state.playing then
@@ -883,6 +1069,7 @@ function key(n, z)
   elseif n == 3 and z == 1 then
     if state.key1_down then
       save_preset_b()
+      show_popup("preset", "B saved")
     else
       state.density    = 0.3 + math.random() * 0.65
       state.groove_idx = math.random(#groove_names)
