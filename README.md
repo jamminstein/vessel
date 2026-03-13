@@ -1,49 +1,29 @@
 # vessel
 
-A conductor for all instruments. A complex generative music system featuring a custom VESSEL engine, tension arcs, harmonic progressions, groove presets (brown/bossa/aphex/daft/maya), and an extensive scale/mode system.
-
-## Install
-
-`;install https://github.com/jamminstein/vessel`
+> Generative music conductor with tension arcs
 
 ## Controls
 
-**Norns:**
-- K1+E1: Set root note
-- K1+E2: Chord voicing control
-- K1+E3: Reverb depth
-- E1: Scale / Mode selection
-- E2: Groove preset selection
-- E3: Density / Scrub control
-- K2: Play / Stop
-- K3: Mutate (trigger new generative variations)
+- **E1** — scale / mode
+- **E2** — groove preset (brown/bossa/aphex/daft/maya/eno)
+- **E3** — density
+- **K1 (hold)** — K1+E1: root note, K1+E2: chord voicing, K1+E3: reverb depth
+- **K2** — play / stop
+- **K3** — mutate all (density, groove, scale)
 
-**Grid (16x8):**
-- Playhead with position indication
-- Scale map visualization
-- Groove layer controls
-- Chord voicing matrix
-- Scale selector
-- Density scrub interface
+## Grid
 
-## Features
-
-- Complex generative music engine with VESSEL synthesis
-- Tension arc system for dynamic expression
-- Harmonic progression generator
-- 5 groove presets: brown, bossa, aphex, daft, maya
-- Comprehensive scale and mode system with root modulation
-- Chord voicing control
-- Density-based pattern generation
-- Reverb integration for spatial depth
-- Multi-layer grid interface for intuitive control
+Melody playhead, scale degree map, groove pattern layers, chord/scale/density selectors, and performance presets. Row 8 for transport and groove selection.
 
 ## Requirements
 
 - norns
-- 16x8 grid
-- Engine_VESSEL engine (included)
+- grid (16×8)
+- MIDI devices: OP-XY, OP-Z, OP-1 Field (auto-detect)
+- engine: VESSEL (custom SuperCollider)
 
-## Author
+## Install
 
-@jamminstein
+```
+;install https://github.com/jamminstein/vessel
+```
