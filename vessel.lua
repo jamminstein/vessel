@@ -1,5 +1,5 @@
 -- vessel
--- v2.1.0 @tiago
+-- v2.2.0 @tiago
 -- llllllll.co
 --
 -- a conductor for all instruments
@@ -17,6 +17,9 @@
 -- │  K1 + E1     root note (semitones)                    │
 -- │  K1 + E2     chord voicing                            │
 -- │  K1 + E3     reverb depth                             │
+-- │                                                       │
+-- │  NEW v2.2: Audio follow mode (modulates tension)      │
+-- │  NEW v2.2: Preset morphing A/B (smooth blending)      │
 -- └───────────────────────────────────────────────────────┘
 --
 -- ┌─ GRID (16x8) ──────────────────────────────────────────┐
@@ -30,6 +33,9 @@
 -- │  Row 8 c3-8  groove preset                             │
 -- │              (brown/bossa/aphex/daft/maya/eno)         │
 -- │  Row 8 c16   mutate                                    │
+-- │                                                        │
+-- │  K1+K2: save preset A    K1+K3: save preset B          │
+-- │  E3 (K1): morph A ↔ B with smooth crossfade           │
 -- └────────────────────────────────────────────────────────┘
 
 engine.name = "VESSEL"
@@ -61,6 +67,106 @@ local state = {
   progression  = {0,0,0,0}, -- current harmonic offsets
   prog_step    = 1,         -- which step in progression
 }
+
+-- ─────────────────────────────────────────────────────────
+-- AUDIO FOLLOW MODE
+-- ─────────────────────────────────────────────────────────
+local audio_follow_mode = false
+local audio_level_current = 0
+
+local function audio_follow_tick()
+  if not audio_follow_mode then return end
+  -- Poll norns audio input level
+  local amp_in = params:get("amp_in_l") or 0
+  audio_level_current = util.clamp(amp_in, 0, 1)
+  -- Modulate tension based on input
+  -- Higher input = higher tension, quiet = decay
+  local target_tension = audio_level_current * 0.8  -- cap at 80% to avoid saturation
+  tension.value = tension.value + (target_tension - tension.value) * 0.05  -- smooth blend
+  tension.value = util.clamp(tension.value, 0.1, 1.0)
+end
+
+-- ─────────────────────────────────────────────────────────
+-- PRESET MORPHING A/B
+-- ─────────────────────────────────────────────────────────
+local presets = {
+  a = { density=0.65, groove_idx=1, scale_idx=1, chord_idx=1, reverb=0.15 },
+  b = { density=0.65, groove_idx=1, scale_idx=1, chord_idx=1, reverb=0.15 },
+}
+
+local preset_morph_target = 'a'
+local preset_morph_amount = 0  -- 0=a, 1=b
+local preset_morphing = false
+local preset_morph_speed = 0.03  -- blend per frame
+
+local function save_preset_a()
+  presets.a = {
+    density = state.density,
+    groove_idx = state.groove_idx,
+    scale_idx = state.scale_idx,
+    chord_idx = state.chord_idx,
+    reverb = state.reverb,
+  }
+  toast("Preset A saved")
+end
+
+local function save_preset_b()
+  presets.b = {
+    density = state.density,
+    groove_idx = state.groove_idx,
+    scale_idx = state.scale_idx,
+    chord_idx = state.chord_idx,
+    reverb = state.reverb,
+  }
+  toast("Preset B saved")
+end
+
+local function start_morph_to_b()
+  preset_morph_target = 'b'
+  preset_morphing = true
+end
+
+local function start_morph_to_a()
+  preset_morph_target = 'a'
+  preset_morphing = true
+end
+
+local function apply_morphed_preset()
+  -- Interpolate between A and B
+  local a = presets.a
+  local b = presets.b
+  local t = preset_morph_amount  -- 0 to 1
+
+  state.density = a.density + (b.density - a.density) * t
+  state.reverb = a.reverb + (b.reverb - a.reverb) * t
+  -- Discrete params snap at midpoint
+  if t < 0.5 then
+    state.groove_idx = a.groove_idx
+    state.scale_idx = a.scale_idx
+    state.chord_idx = a.chord_idx
+  else
+    state.groove_idx = b.groove_idx
+    state.scale_idx = b.scale_idx
+    state.chord_idx = b.chord_idx
+  end
+
+  build_groove_stack()
+  engine.set_rev(state.reverb)
+  state.screen_dirty = true
+  state.grid_dirty = true
+end
+
+local function morph_tick()
+  if not preset_morphing then return end
+  if preset_morph_target == 'b' then
+    preset_morph_amount = math.min(1.0, preset_morph_amount + preset_morph_speed)
+    if preset_morph_amount >= 1.0 then preset_morphing = false end
+  else
+    preset_morph_amount = math.max(0.0, preset_morph_amount - preset_morph_speed)
+    if preset_morph_amount <= 0.0 then preset_morphing = false end
+  end
+  apply_morphed_preset()
+end
 
 local groove_stack = nil
 local cr = groove.make_call_response(8, 8)
@@ -107,6 +213,10 @@ local function is_eno()
   return groove_names[state.groove_idx] == "eno"
 end
 
+local function toast(msg)
+  print(msg)  -- Display toast via console
+end
+
 local function find_midi_device(partial_name)
   for i = 1, #midi.devices do
     local d = midi.devices[i]
@@ -115,7 +225,7 @@ local function find_midi_device(partial_name)
     end
   end
   return nil
-nend
+end
 
 -- -------------------------------------------------------------------------
 -- MIDI HELPERS
@@ -157,7 +267,6 @@ end
 
 local function play_harm(degree, vel, gate_time, harm_offset)
   -- ENO: stretch every note into a long, breathing ambient tone
-  -- inspired by Music for Airports / Discreet Music tape loop philosophy
   if is_eno() then
     gate_time = 1.8 + math.random() * 2.6
     vel       = math.max(28, math.min(62, vel))
@@ -186,7 +295,6 @@ local function play_bass(degree, vel, gate_time)
     gate_time = 2.2 + math.random() * 2.0
     vel       = math.floor(vel * 0.5)
   end
-  -- Current progression step's harmonic offset
   local offset = state.progression[state.prog_step] or 0
   local freq = get_scale_freq(degree, offset) * 0.5
   local amp  = (vel / 127) * 1.1
@@ -288,60 +396,6 @@ local function build_lattice()
   if the_lattice then the_lattice:destroy() end
   the_lattice = lattice:new({ ppqn = 96 })
 
-  -- BAR CLOCK: fires every 4 beats — drives tension arc + chord changes
-  sprockets.bar = the_lattice:new_sprocket({
-    action = function(t)
-      if not state.playing then return end
-      state.bar = state.bar + 1
-
-      -- Advance progression step every bar
-      state.prog_step = (state.prog_step % 4) + 1
-
-      -- Tension arc tick
-      local released = tension.tick_bar()
-
-      -- On release: break + rebuild groove + oracle flash
-      if released then
-        build_groove_stack()
-        state.progression = tension.get_progression()
-        local groove_name = groove_names[state.groove_idx]
-        local phase, _    = cr:peek()
-        oracle.flash(oracle.pick_word(groove_name, 0.9, phase), 1.0)
-      else
-        -- Every 4 bars: advance progression
-        if state.bar % 4 == 0 then
-          state.progression = tension.get_progression()
-          play_chord(60 + tension.value * 30, 1.8)
-        end
-      end
-
-      -- Oracle tick (new word every N beats based on tension)
-      local groove_name = groove_names[state.groove_idx]
-      local phase, _    = cr:peek()
-      oracle.tick(groove_name, tension.value, phase)
-
-      -- OP-Z automation: FX + master
-      local rev_val  = math.floor(tension.reverb_depth() * 127)
-      send_cc(midi_opz, 9,  19, rev_val)           -- FX1 reverb
-      send_cc(midi_opz, 10, 16, math.floor(tension.value * 100)) -- FX2 distortion
-      -- OP-XY filter automation tied to tension
-      local filt_val = tension.filter_cc()
-      send_cc(midi_opxy, params:get("opxy_ch_lead"), 74, filt_val)
-
-      state.screen_dirty = true
-    end,
-    division = 1/1,  -- once per beat; we count internally for bars
-    enabled  = true,
-  })
-
-  -- Actually: trigger bar logic every 4 beats = every bar
-  -- Override: use a slower sprocket division
-  sprockets.bar.division = 1/4  -- fires 4x per beat; bar counter handles 4-beat grouping
-  -- Correction: let's just fire once per beat and count to 4
-  -- Rebuild with correct approach:
-  the_lattice:destroy()
-  the_lattice = lattice:new({ ppqn = 96 })
-
   -- PULSE: fires every beat (quarter note)
   local beat_count = 0
   sprockets.pulse = the_lattice:new_sprocket({
@@ -403,18 +457,15 @@ local function build_lattice()
       state.step = state.step + 1
 
       -- ENO: chance-based sparse ambient melody
-      -- "I am the beach" — notes drift in and out like fog
-      -- Inspired by Music for Airports and Discreet Music
       if is_eno() then
         if math.random() < 0.07 then
           local eno_degree = math.random(scale_len())
-          play_harm(eno_degree, math.random(28, 58), 0.1) -- gate overridden inside play_harm
+          play_harm(eno_degree, math.random(28, 58), 0.1)
         end
         state.grid_dirty = true
         return
       end
 
-      -- Call/response: only tick here (not in redraw)
       local phase, pos = cr:tick()
       local s_len      = scale_len()
 
@@ -425,13 +476,11 @@ local function build_lattice()
         degree = math.max(1, s_len - (pos % s_len))
       end
 
-      -- Probability: density × tension multiplier, boosted in aphex mode
       local fire_prob = state.density * tension.density_mult() * 0.65
       if state.groove_idx == 3 then fire_prob = fire_prob * 1.3 end
       fire_prob = math.min(0.98, fire_prob)
 
       if math.random() < fire_prob then
-        -- Frusciante-style velocity arc
         local vel
         if phase == "call" then
           vel = math.floor(55 + (pos / 8) * 45)
@@ -454,7 +503,6 @@ local function build_lattice()
   sprockets.drums = the_lattice:new_sprocket({
     action = function(t)
       if not state.playing then return end
-      -- ENO: silence is an instrument — no drums in ambient mode
       if is_eno() then return end
 
       local div_sec = clock.get_beat_sec() / 4
@@ -469,11 +517,9 @@ local function build_lattice()
           local decays = {0.4, 0.2, 0.08, 0.18}
 
           local f = freqs[layer] or 200
-          -- Aphex: per-hit pitch variation
           if state.groove_idx == 3 then
             f = f * (0.88 + math.random() * 0.44)
           end
-          -- Tension: all drum pitches rise slightly under pressure
           f = f * (1 + tension.value * 0.12)
 
           local offset = evt.offset or 0
@@ -496,15 +542,12 @@ local function build_lattice()
   sprockets.texture = the_lattice:new_sprocket({
     action = function(t)
       if not state.playing then return end
-      -- ENO: texture IS the music — pads are the primary melodic voice
-      -- Chance-based, independent of tension, always evolving
       if is_eno() then
         if math.random() < 0.62 then
           play_texture(math.random(1, scale_len()))
         end
         return
       end
-      -- Fire texture only at high tension or on release
       if tension.value > 0.55 or tension.just_released then
         if math.random() < 0.3 then
           play_texture(math.random(2, scale_len()))
@@ -529,20 +572,20 @@ local function grid_redraw()
   local s_len = scale_len()
   local t_bright = tension.grid_bright()
 
-  -- Row 1: Playhead (ENO: slow pulse, dimmer)
+  -- Row 1: Playhead
   for col = 1, 16 do
     local bright = col == step and (is_eno() and 8 or 15) or (is_eno() and 1 or 2)
     g:led(col, 1, bright)
   end
 
-  -- Row 2: Scale degree map (which cols are valid scale degrees)
+  -- Row 2: Scale degree map
   for col = 1, 16 do
     local bright = (col <= s_len) and 6 or 1
     if col == step then bright = math.max(bright, 10) end
     g:led(col, 2, bright)
   end
 
-  -- Rows 3-4: Groove layers (ENO: dimmed — drums are off)
+  -- Rows 3-4: Groove layers
   if groove_stack then
     for li = 1, math.min(4, #groove_stack.layers) do
       local row   = li + 2
@@ -551,7 +594,7 @@ local function grid_redraw()
         local active = layer.pattern(col)
         local bright
         if is_eno() then
-          bright = active and 2 or 0  -- ENO: faint ghost pattern
+          bright = active and 2 or 0
         else
           bright = active and (col == step and 15 or t_bright) or 1
         end
@@ -570,7 +613,7 @@ local function grid_redraw()
     g:led(i, 6, i == state.scale_idx and 15 or 3)
   end
 
-  -- Row 7: Density scrub bar (ENO: very dim — density is intentionally low)
+  -- Row 7: Density scrub bar
   local den_cols = math.floor(state.density * 16)
   for col = 1, 16 do
     local bright = col <= den_cols and t_bright or 1
@@ -581,11 +624,13 @@ local function grid_redraw()
   -- Row 8: Transport + groove presets + mutate
   g:led(1, 8, state.playing and 15 or 5)
   for i, _ in ipairs(groove_names) do
-    -- ENO slot glows softer (ambient glow vs bright)
     local on_bright  = (i == 6) and 10 or 15
     local off_bright = (i == 6) and 3 or 4
     g:led(i + 2, 8, i == state.groove_idx and on_bright or off_bright)
   end
+  -- Preset morph indicator (row 8, rightmost area)
+  local morph_bright = preset_morphing and 15 or (math.floor(preset_morph_amount * 10) + 3)
+  g:led(15, 8, morph_bright)
   g:led(16, 8, 7)
 
   g:refresh()
@@ -615,17 +660,22 @@ g.key = function(x, y, z)
         if the_lattice then the_lattice:stop() end
         all_notes_off()
       end
-    elseif x >= 3 and x <= 8 then  -- extended to col 8 for ENO (6th preset)
+    elseif x >= 3 and x <= 8 then
       state.groove_idx = x - 2
       build_groove_stack()
-      -- ENO: auto-configure ambient parameters when selected
-      -- Brian Eno's philosophy: let the room do the work
       if is_eno() then
         state.reverb  = 0.55
         state.density = 0.12
         engine.set_rev(state.reverb)
         build_groove_stack()
         oracle.flash("eno", 1.8)
+      end
+    elseif x == 15 then
+      -- Morph indicator - click to toggle direction
+      if preset_morph_amount < 0.5 then
+        start_morph_to_b()
+      else
+        start_morph_to_a()
       end
     elseif x == 16 then
       -- Mutate
@@ -634,7 +684,6 @@ g.key = function(x, y, z)
       state.scale_idx  = math.random(#scale_names)
       build_groove_stack()
       if is_eno() then
-        -- Mutate into ENO: honour the ambient intention
         state.density = 0.1 + math.random() * 0.15
         state.reverb  = 0.45 + math.random() * 0.15
         engine.set_rev(state.reverb)
@@ -663,7 +712,7 @@ local function redraw()
     screen.fill()
   end
 
-  -- Oracle word — drawn first so UI sits on top
+  -- Oracle word
   oracle.update()
   oracle.draw()
 
@@ -685,6 +734,24 @@ local function redraw()
   screen.rect(78, 2, tension.bar_width(), 5)
   screen.fill()
 
+  -- Audio follow indicator
+  if audio_follow_mode then
+    screen.level(math.floor(3 + audio_level_current * 12))
+    screen.move(70, 15)
+    screen.text("A")
+  end
+
+  -- Preset morph indicator
+  screen.level(4)
+  screen.move(70, 22)
+  local morph_label = "A"
+  if preset_morph_amount > 0.1 and preset_morph_amount < 0.9 then
+    morph_label = string.format("%.0f%%", preset_morph_amount * 100)
+  elseif preset_morph_amount >= 0.9 then
+    morph_label = "B"
+  end
+  screen.text(morph_label)
+
   -- Current scale + root (bottom left)
   screen.level(9)
   screen.font_size(8)
@@ -696,7 +763,6 @@ local function redraw()
   screen.text(musicutil.note_num_to_name(state.root_note, true))
 
   -- Groove + chord (bottom right)
-  -- ENO: display with a subtle wave indicator
   if is_eno() then
     screen.level(10)
     screen.move(80, 54)
@@ -713,9 +779,9 @@ local function redraw()
     screen.text(chord_names[state.chord_idx] or "?")
   end
 
-  -- Phase indicator (call / resp) — hidden in ENO (no call/response structure)
+  -- Phase indicator (hidden in ENO)
   if not is_eno() then
-    local phase, pos = cr:peek()   -- safe: no side effects
+    local phase, pos = cr:peek()
     screen.level(phase == "call" and 8 or 4)
     screen.move(110, 8)
     screen.text(phase == "call" and "C" or "R")
@@ -738,6 +804,8 @@ local function start_redraw_clocks()
     while true do
       clock.sleep(1/20)
       tension.update()
+      audio_follow_tick()
+      morph_tick()
       if state.screen_dirty then
         redraw()
         state.screen_dirty = false
@@ -765,9 +833,12 @@ function enc(n, d)
     elseif n == 2 then
       state.chord_idx = util.clamp(state.chord_idx + d, 1, #chord_names)
     elseif n == 3 then
-      local rev = util.clamp(state.reverb + d * 0.02, 0, 0.6)
-      state.reverb = rev
-      engine.set_rev(rev)
+      -- Morph between presets A and B
+      if d > 0 then
+        start_morph_to_b()
+      else
+        start_morph_to_a()
+      end
     end
   else
     if n == 1 then
@@ -775,7 +846,6 @@ function enc(n, d)
     elseif n == 2 then
       state.groove_idx = util.clamp(state.groove_idx + d, 1, #groove_names)
       build_groove_stack()
-      -- ENO: auto-configure when scrolled into
       if is_eno() then
         state.reverb  = 0.55
         state.density = 0.12
@@ -797,22 +867,30 @@ function key(n, z)
     state.key1_down = (z == 1)
 
   elseif n == 2 and z == 1 then
-    state.playing = not state.playing
-    if state.playing then
-      build_groove_stack()
-      if the_lattice then the_lattice:start() end
+    if state.key1_down then
+      save_preset_a()
     else
-      if the_lattice then the_lattice:stop() end
-      all_notes_off()
+      state.playing = not state.playing
+      if state.playing then
+        build_groove_stack()
+        if the_lattice then the_lattice:start() end
+      else
+        if the_lattice then the_lattice:stop() end
+        all_notes_off()
+      end
     end
 
   elseif n == 3 and z == 1 then
-    state.density    = 0.3 + math.random() * 0.65
-    state.groove_idx = math.random(#groove_names)
-    build_groove_stack()
-    local gname = groove_names[state.groove_idx]
-    local p, _  = cr:peek()
-    oracle.flash(oracle.pick_word(gname, tension.value, p))
+    if state.key1_down then
+      save_preset_b()
+    else
+      state.density    = 0.3 + math.random() * 0.65
+      state.groove_idx = math.random(#groove_names)
+      build_groove_stack()
+      local gname = groove_names[state.groove_idx]
+      local p, _  = cr:peek()
+      oracle.flash(oracle.pick_word(gname, tension.value, p))
+    end
   end
 
   state.screen_dirty = true
@@ -868,6 +946,12 @@ local function add_params()
     engine.set_tape(v)
   end)
 
+  params:add_separator("AUDIO FOLLOW")
+  params:add_binary("audio_follow_mode", "audio follow enable", "toggle", 0)
+  params:set_action("audio_follow_mode", function(v)
+    audio_follow_mode = (v == 1)
+  end)
+
   params:add_separator("MIDI")
   params:add_number("opxy_ch_lead",  "OP-XY lead ch",   1, 16, 6)
   params:add_number("opxy_ch_bass",  "OP-XY bass ch",   1, 16, 5)
@@ -906,8 +990,9 @@ function init()
   state.screen_dirty = true
   state.grid_dirty   = true
 
-  print("VESSEL v2.1 initialized")
-  print("ENO mode available — grid row 8 col 8")
+  print("VESSEL v2.2 initialized")
+  print("Audio follow mode available in PARAMS")
+  print("Preset morph: K1+E3 to blend between A & B")
   print("OP-XY: " .. (midi_opxy and "connected" or "not found"))
   print("OP-Z:  " .. (midi_opz  and "connected" or "not found"))
   print("OP-1 Field: " .. (midi_op1 and "connected" or "not found"))
