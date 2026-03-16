@@ -1189,10 +1189,5 @@ function cleanup()
   clock.cancel_all()
   if the_lattice then the_lattice:destroy() end
   if redraw_metro then redraw_metro:stop() end
-  if m then
-    for ch = 1, 16 do
-      m:cc(123, 0, ch)
-      m:cc(120, 0, ch)
-    end
-  end
+  all_notes_off()
 end
