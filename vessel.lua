@@ -190,6 +190,12 @@ local function release_voice(voice_id)
 end
 
 -- ────────────────────────────────────────────────────────────────────────────────
+-- GRID & ARC DEVICE INITIALIZATION
+-- ────────────────────────────────────────────────────────────────────────────────
+grid_devices = {}
+arc_devices = {}
+
+-- ────────────────────────────────────────────────────────────────────────────────
 -- INIT / CLEANUP
 -- ────────────────────────────────────────────────────────────────────────────────
 
@@ -206,22 +212,22 @@ function init()
   -- device setup
   params:add_group("engine", 100)
   params:add_separator("FM7")
-  params:add("fm_ratio", "FM ratio", controlspec.new(0.5, 8, "lin", 0.1, 2.0))
+  params:add_control("fm_ratio", "FM ratio", controlspec.new(0.5, 8, "lin", 0.1, 2.0))
   params:set_action("fm_ratio", function(v) engine.hz2(v) end)
-  params:add("fm_index", "FM index", controlspec.new(0, 5, "lin", 0.1, 0.5))
+  params:add_control("fm_index", "FM index", controlspec.new(0, 5, "lin", 0.1, 0.5))
   params:set_action("fm_index", function(v) engine.hz2_to_hz1(v) end)
-  params:add("fm_attack", "FM attack", controlspec.new(0.001, 2.0, "exp", 0, 0.05))
+  params:add_control("fm_attack", "FM attack", controlspec.new(0.001, 2.0, "exp", 0, 0.05))
   params:set_action("fm_attack", function(v) engine.opAmpA1(v); engine.opAmpA2(v) end)
-  params:add("fm_decay", "FM decay", controlspec.new(0.01, 2.0, "exp", 0, 0.1))
+  params:add_control("fm_decay", "FM decay", controlspec.new(0.01, 2.0, "exp", 0, 0.1))
   params:set_action("fm_decay", function(v) engine.opAmpD1(v); engine.opAmpD2(v) end)
-  params:add("fm_sustain", "FM sustain", controlspec.new(0, 1, "lin", 0.01, 1.0))
+  params:add_control("fm_sustain", "FM sustain", controlspec.new(0, 1, "lin", 0.01, 1.0))
   params:set_action("fm_sustain", function(v) engine.opAmpS1(v); engine.opAmpS2(v) end)
-  params:add("fm_release", "FM release", controlspec.new(0.05, 8.0, "exp", 0, 1.0))
+  params:add_control("fm_release", "FM release", controlspec.new(0.05, 8.0, "exp", 0, 1.0))
   params:set_action("fm_release", function(v) engine.opAmpR1(v); engine.opAmpR2(v) end)
-  params:add("reverb", "reverb depth", 0, 1, 0.15)
+  params:add_control("reverb", "reverb depth", controlspec.new(0, 1, "lin", 0.01, 0.15))
 
   params:add_group("network", 100)
-  params:add("midi_out_device", "MIDI Out", 1, 16, 1)
+  params:add_number("midi_out_device", "MIDI Out", 1, 16, 1)
 
   params:add_group("OP-XY", 4)
   params:add_option("opxy_enabled", "OP-XY output", {"off", "on"}, 1)
