@@ -109,7 +109,7 @@ Engine_VESSEL : CroneEngine {
       sig = RLPF.ar(sig, cutoff.lag(0.3), rq);
 
       // Slow stereo movement (Bossa Nova breathiness)
-      stereo = Pan2.ar(sig, SinOsc.kr(0.07 + (freq * 0.00001)).range(-spread, spread));
+      stereo = Pan2.ar(sig, SinOsc.kr(0.07 + (freq * 0.00001)).range(spread.neg, spread));
 
       Out.ar(out, stereo);
     }).add;
