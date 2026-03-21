@@ -86,6 +86,7 @@ local audio_follow_mode = false
 local midi_clock_ticks = 0
 local midi_clock_ppq = 24  -- default: 24 ticks per quarter note
 local is_receiving_midi_clock = false
+local midi_out = nil
 
 -- ────────────────────────────────────────────────────────────────────────────────
 -- TUTTI/SOLI STATE (section orchestration)
@@ -129,6 +130,24 @@ local tension_arc = {
 }
 
 -- ────────────────────────────────────────────────────────────────────────────────
+-- VOICE ALLOCATION (thread-safe single allocator)
+-- ────────────────────────────────────────────────────────────────────────────────
+local voice_pool = {free = {}, active = {}}
+
+local function allocate_voice()
+  if #voice_pool.free > 0 then
+    return table.remove(voice_pool.free)
+  end
+  return nil
+end
+
+local function release_voice(voice_id)
+  if voice_id then
+    table.insert(voice_pool.free, voice_id)
+  end
+end
+
+-- ────────────────────────────────────────────────────────────────────────────────
 -- INIT / CLEANUP
 -- ────────────────────────────────────────────────────────────────────────────────
 
@@ -138,6 +157,9 @@ function init()
   -- lattice setup
   the_lattice = lattice:new({ppq = 8, swing = 0})
   the_lattice:start()
+
+  -- MIDI setup
+  midi_out = midi.connect(params:get("midi_out_device") or 1)
 
   -- device setup
   params:add_group("engine", 100)
@@ -548,7 +570,17 @@ end
 
 function cleanup()
   clock.cancel_all()
-  if the_lattice then the_lattice:destroy() end
-  if redraw_metro then redraw_metro:stop() end
+  -- Destroy lattice and send MIDI all-notes-off
+  if the_lattice then
+    the_lattice:destroy()
+  end
+  if midi_out then
+    for ch = 1, 16 do
+      midi_out:cc(123, 0, ch)
+    end
+  end
+  if redraw_metro then
+    redraw_metro:stop()
+  end
   all_notes_off()
 end
