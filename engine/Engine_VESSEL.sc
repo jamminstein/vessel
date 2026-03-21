@@ -27,18 +27,20 @@ Engine_VESSEL : CroneEngine {
       fb=0.3, ratio=2.0, idx=2.0,
       pan=0, cutoff=4000, rq=0.5, drive=0.3;
 
-      var env = EnvGen.kr(Env.asr(atk, sus, rel), gate, doneAction:2);
-      var mod_env = EnvGen.kr(Env.asr(0.001, 0.2, rel * 0.8), gate);
+      var env, mod_env, feedback, mod, car, body, sig;
+
+      env = EnvGen.kr(Env.asr(atk, sus, rel), gate, doneAction:2);
+      mod_env = EnvGen.kr(Env.asr(0.001, 0.2, rel * 0.8), gate);
 
       // FM with feedback loop
-      var feedback = LocalIn.ar(1) * fb;
-      var mod = SinOsc.ar(freq * ratio + feedback) * freq * idx * mod_env;
-      var car = SinOsc.ar(freq + mod);
+      feedback = LocalIn.ar(1) * fb;
+      mod = SinOsc.ar(freq * ratio + feedback) * freq * idx * mod_env;
+      car = SinOsc.ar(freq + mod);
       LocalOut.ar(car * 0.5);
 
       // Second operator for body
-      var body = SinOsc.ar(freq * 0.5) * 0.4;
-      var sig = (car + body) * env * amp;
+      body = SinOsc.ar(freq * 0.5) * 0.4;
+      sig = (car + body) * env * amp;
 
       // Warm resonant filter with character
       sig = RLPF.ar(sig, cutoff.lag(0.05), rq);
@@ -61,20 +63,22 @@ Engine_VESSEL : CroneEngine {
       brightness=0.5, damping=0.5,
       sub_mix=0.4, pan=0;
 
-      var env = EnvGen.kr(Env.asr(atk, 1, rel), gate, doneAction:2);
+      var env, excite, string, sub, click, sig;
+
+      env = EnvGen.kr(Env.asr(atk, 1, rel), gate, doneAction:2);
 
       // Karplus-Strong pluck
-      var excite = WhiteNoise.ar * EnvGen.kr(Env.perc(0.001, 0.01));
-      var string = CombL.ar(excite, 1/freq, 1/freq, damping * 8);
+      excite = WhiteNoise.ar * EnvGen.kr(Env.perc(0.001, 0.01));
+      string = CombL.ar(excite, 1/freq, 1/freq, damping * 8);
       string = LPF.ar(string, freq * (2 + brightness * 6));
 
       // Sub oscillator with slight detuning for warmth
-      var sub = SinOsc.ar([freq, freq * 1.002]) * sub_mix;
+      sub = SinOsc.ar([freq, freq * 1.002]) * sub_mix;
 
       // Punchy transient
-      var click = Impulse.ar(0) * 0.3 * EnvGen.kr(Env.perc(0.001, 0.08));
+      click = Impulse.ar(0) * 0.3 * EnvGen.kr(Env.perc(0.001, 0.08));
 
-      var sig = ((string * 0.7) + sub + click) * env * amp;
+      sig = ((string * 0.7) + sub + click) * env * amp;
       sig = CompanderD.ar(sig, sig, 0.3, 1, 0.3, 0.001, 0.1);
       sig = Pan2.ar(sig.sum, pan);
 
@@ -90,20 +94,22 @@ Engine_VESSEL : CroneEngine {
       density=15, spread=0.3, size=0.2,
       pan=0, cutoff=1200, rq=0.8;
 
-      var env = EnvGen.kr(Env.asr(atk, 1, rel), gate, doneAction:2);
+      var env, freqs, grains, noise, sig, stereo;
+
+      env = EnvGen.kr(Env.asr(atk, 1, rel), gate, doneAction:2);
 
       // Pitch-spread granular cloud
-      var freqs = freq * [1.0, 1.001, 0.999, 2.003, 0.5005];
-      var grains = Mix(SinOsc.ar(freqs) * LFNoise1.kr(density ! 5).range(0, 1));
+      freqs = freq * [1.0, 1.001, 0.999, 2.003, 0.5005];
+      grains = Mix(SinOsc.ar(freqs) * LFNoise1.kr(density ! 5).range(0, 1));
 
       // Filtered noise shimmer layer
-      var noise = BPF.ar(PinkNoise.ar, freq * 2, 0.1) * 0.3;
+      noise = BPF.ar(PinkNoise.ar, freq * 2, 0.1) * 0.3;
 
-      var sig = (grains * 0.6 + noise) * env * amp;
+      sig = (grains * 0.6 + noise) * env * amp;
       sig = RLPF.ar(sig, cutoff.lag(0.3), rq);
 
       // Slow stereo movement (Bossa Nova breathiness)
-      var stereo = Pan2.ar(sig, SinOsc.kr(0.07 + (freq * 0.00001)).range(-spread, spread));
+      stereo = Pan2.ar(sig, SinOsc.kr(0.07 + (freq * 0.00001)).range(-spread, spread));
 
       Out.ar(out, stereo);
     }).add;
@@ -117,18 +123,20 @@ Engine_VESSEL : CroneEngine {
       tone=0.5, body=0.3, click=0.6,
       decay=0.3, pitch_drop=0.8, pan=0;
 
+      var pitch_env, body_osc, noise_env, noise_sig, click_sig, sig;
+
       // Pitched body: exponential pitch drop
-      var pitch_env = EnvGen.kr(Env.perc(0.001, decay * 2)) * freq * pitch_drop + freq;
-      var body_osc = SinOsc.ar(pitch_env) * EnvGen.kr(Env.perc(0.001, decay * 1.5));
+      pitch_env = EnvGen.kr(Env.perc(0.001, decay * 2)) * freq * pitch_drop + freq;
+      body_osc = SinOsc.ar(pitch_env) * EnvGen.kr(Env.perc(0.001, decay * 1.5));
 
       // Noise transient with bandpass
-      var noise_env = EnvGen.kr(Env.perc(0.0005, decay * tone));
-      var noise_sig = BPF.ar(WhiteNoise.ar, freq * 2, 0.5) * noise_env;
+      noise_env = EnvGen.kr(Env.perc(0.0005, decay * tone));
+      noise_sig = BPF.ar(WhiteNoise.ar, freq * 2, 0.5) * noise_env;
 
       // Click transient
-      var click_sig = HPF.ar(WhiteNoise.ar, 3000) * EnvGen.kr(Env.perc(0.0001, 0.008)) * click;
+      click_sig = HPF.ar(WhiteNoise.ar, 3000) * EnvGen.kr(Env.perc(0.0001, 0.008)) * click;
 
-      var sig = (body_osc * body + noise_sig + click_sig) * amp;
+      sig = (body_osc * body + noise_sig + click_sig) * amp;
       sig = (sig * 1.5).tanh; // saturation for character
       DetectSilence.ar(sig, doneAction:2);
       sig = Pan2.ar(sig, pan);
@@ -146,18 +154,20 @@ Engine_VESSEL : CroneEngine {
       atk=0.08, dec=0.2, sus=0.6, rel=1.5,
       detune=0.003, pan=0, cutoff=3000, rq=0.7;
 
-      var env = EnvGen.kr(Env.asr(atk, sus, rel), gate, doneAction:2);
+      var env, v1, v2, v3, v4, harmonics, sig;
+
+      env = EnvGen.kr(Env.asr(atk, sus, rel), gate, doneAction:2);
 
       // Each voice slightly detuned — creates natural beating/warmth
-      var v1 = SinOsc.ar([freq1, freq1 * (1 + detune)]).sum * 0.5;
-      var v2 = SinOsc.ar([freq2, freq2 * (1 - detune * 0.7)]).sum * 0.5;
-      var v3 = SinOsc.ar([freq3, freq3 * (1 + detune * 0.5)]).sum * 0.5;
-      var v4 = SinOsc.ar([freq4, freq4 * (1 - detune * 0.3)]).sum * 0.5;
+      v1 = SinOsc.ar([freq1, freq1 * (1 + detune)]).sum * 0.5;
+      v2 = SinOsc.ar([freq2, freq2 * (1 - detune * 0.7)]).sum * 0.5;
+      v3 = SinOsc.ar([freq3, freq3 * (1 + detune * 0.5)]).sum * 0.5;
+      v4 = SinOsc.ar([freq4, freq4 * (1 - detune * 0.3)]).sum * 0.5;
 
       // Add subtle harmonics (2nd + 3rd partial)
-      var harmonics = (SinOsc.ar(freq1 * 2) + SinOsc.ar(freq1 * 3)) * 0.08;
+      harmonics = (SinOsc.ar(freq1 * 2) + SinOsc.ar(freq1 * 3)) * 0.08;
 
-      var sig = (v1 + v2 + v3 + v4 + harmonics) * env * amp;
+      sig = (v1 + v2 + v3 + v4 + harmonics) * env * amp;
       sig = RLPF.ar(sig, cutoff.lag(0.1), rq);
       sig = sig + (CombN.ar(sig, 0.25, 0.25, 2) * 0.15); // subtle hall
       sig = Pan2.ar(sig, pan);
@@ -173,14 +183,16 @@ Engine_VESSEL : CroneEngine {
       room=0.3, damp=0.6, rev_mix=0.12,
       tape_sat=0.2, lp_freq=16000;
 
-      var sig = In.ar(in, 2);
+      var sig, rev;
+
+      sig = In.ar(in, 2);
 
       // Tape warmth: soft saturation + gentle high-freq rolloff
       sig = (sig * (1 + tape_sat)).tanh * (1 / (1 + tape_sat * 0.5));
       sig = LPF.ar(sig, lp_freq);
 
       // Plate reverb
-      var rev = FreeVerb2.ar(sig[0], sig[1], rev_mix, room, damp);
+      rev = FreeVerb2.ar(sig[0], sig[1], rev_mix, room, damp);
       sig = sig + rev;
 
       // Transparent limiter
