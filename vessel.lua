@@ -207,10 +207,10 @@ function init()
   the_lattice:start()
 
   -- MIDI setup
-  midi_out = midi.connect(params:get("midi_out_device") or 1)
+  midi_out = midi.connect(1)
 
   -- device setup
-  params:add_group("engine", 100)
+  params:add_group("engine", 8)
   params:add_separator("FM7")
   params:add_control("fm_ratio", "FM ratio", controlspec.new(0.5, 8, "lin", 0.1, 2.0))
   params:set_action("fm_ratio", function(v) engine.hz2(v) end)
@@ -226,7 +226,7 @@ function init()
   params:set_action("fm_release", function(v) engine.opAmpR1(v); engine.opAmpR2(v) end)
   params:add_control("reverb", "reverb depth", controlspec.new(0, 1, "lin", 0.01, 0.15))
 
-  params:add_group("network", 100)
+  params:add_group("network", 1)
   params:add_number("midi_out_device", "MIDI Out", 1, 16, 1)
 
   params:add_group("OP-XY", 4)
