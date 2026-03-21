@@ -27,8 +27,8 @@ Engine_VESSEL : CroneEngine {
       fb=0.3, ratio=2.0, idx=2.0,
       pan=0, cutoff=4000, rq=0.5, drive=0.3;
 
-      var env = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction:2);
-      var mod_env = EnvGen.kr(Env.adsr(0.001, 0.3, 0.2, rel * 0.8), gate);
+      var env = EnvGen.kr(Env.asr(atk, sus, rel), gate, doneAction:2);
+      var mod_env = EnvGen.kr(Env.asr(0.001, 0.2, rel * 0.8), gate);
 
       // FM with feedback loop
       var feedback = LocalIn.ar(1) * fb;
@@ -146,7 +146,7 @@ Engine_VESSEL : CroneEngine {
       atk=0.08, dec=0.2, sus=0.6, rel=1.5,
       detune=0.003, pan=0, cutoff=3000, rq=0.7;
 
-      var env = EnvGen.kr(Env.adsr(atk, dec, sus, rel), gate, doneAction:2);
+      var env = EnvGen.kr(Env.asr(atk, sus, rel), gate, doneAction:2);
 
       // Each voice slightly detuned — creates natural beating/warmth
       var v1 = SinOsc.ar([freq1, freq1 * (1 + detune)]).sum * 0.5;
@@ -234,7 +234,8 @@ Engine_VESSEL : CroneEngine {
       synths[\texture] = Synth.head(context.xg, \vessel_texture, [
         \out, context.out_b,
         \freq, msg[2], \amp, msg[3],
-        \density, msg[4], \cutoff, msg[5]
+        \density, msg[4], \cutoff, msg[5],
+        \gate, 1
       ]);
     });
 
@@ -258,7 +259,7 @@ Engine_VESSEL : CroneEngine {
         \freq1, msg[2], \freq2, msg[3],
         \freq3, msg[4], \freq4, msg[5],
         \amp, msg[6], \atk, msg[7],
-        \cutoff, msg[8]
+        \cutoff, msg[8], \gate, 1
       ]);
     });
 
