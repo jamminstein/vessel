@@ -130,6 +130,48 @@ local tension_arc = {
 }
 
 -- ────────────────────────────────────────────────────────────────────────────────
+-- OP-XY MIDI MULTI-CHANNEL
+-- ────────────────────────────────────────────────────────────────────────────────
+local opxy_out = nil
+local opxy_enabled = false
+local opxy_device = 1
+local opxy_voice_channels = {
+  harm = 1,
+  bass = 2,
+  texture = 3,
+  chord = 4,
+}
+
+local function opxy_note_on(voice_name, note, vel)
+  if opxy_out and opxy_enabled and opxy_voice_channels[voice_name] then
+    local ch = opxy_voice_channels[voice_name]
+    opxy_out:note_on(note, vel, ch)
+  end
+end
+
+local function opxy_note_off(voice_name, note)
+  if opxy_out and opxy_enabled and opxy_voice_channels[voice_name] then
+    local ch = opxy_voice_channels[voice_name]
+    opxy_out:note_off(note, 0, ch)
+  end
+end
+
+local function opxy_cc(voice_name, cc_num, val)
+  if opxy_out and opxy_enabled and opxy_voice_channels[voice_name] then
+    local ch = opxy_voice_channels[voice_name]
+    opxy_out:cc(cc_num, math.floor(util.clamp(val, 0, 127)), ch)
+  end
+end
+
+local function opxy_all_notes_off()
+  if opxy_out and opxy_enabled then
+    for _, ch in pairs(opxy_voice_channels) do
+      opxy_out:cc(123, 0, ch)
+    end
+  end
+end
+
+-- ────────────────────────────────────────────────────────────────────────────────
 -- VOICE ALLOCATION (thread-safe single allocator)
 -- ────────────────────────────────────────────────────────────────────────────────
 local voice_pool = {free = {}, active = {}}
@@ -180,6 +222,23 @@ function init()
 
   params:add_group("network", 100)
   params:add("midi_out_device", "MIDI Out", 1, 16, 1)
+
+  params:add_group("OP-XY", 4)
+  params:add_option("opxy_enabled", "OP-XY output", {"off", "on"}, 1)
+  params:set_action("opxy_enabled", function(x)
+    opxy_enabled = (x == 2)
+    if opxy_out == nil then
+      opxy_out = midi.connect(params:get("opxy_device"))
+    end
+  end)
+  params:add_number("opxy_device", "OP-XY MIDI device", 1, 4, 1)
+  params:set_action("opxy_device", function(val)
+    opxy_out = midi.connect(val)
+  end)
+  params:add_number("opxy_ch_harm", "OP-XY harm channel", 1, 8, 1)
+  params:set_action("opxy_ch_harm", function(x) opxy_voice_channels.harm = x end)
+  params:add_number("opxy_ch_bass", "OP-XY bass channel", 1, 8, 2)
+  params:set_action("opxy_ch_bass", function(x) opxy_voice_channels.bass = x end)
 
   -- UI
   norns.enc.sens(1, 4)
@@ -518,17 +577,21 @@ end
 -- NOTE PLAYBACK & MIDI
 -- ────────────────────────────────────────────────────────────────────────────────
 
-function play_note(midi_note, velocity, duration)
+function play_note(voice_name, midi_note, velocity, duration)
   engine.start(midi_note, musicutil.note_num_to_hz(midi_note))
+  opxy_note_on(voice_name, midi_note, velocity)
+  
   if duration then
     metro.init():start(duration / 1000, 1, function()
       engine.stop(midi_note)
+      opxy_note_off(voice_name, midi_note)
     end)
   end
 end
 
 function all_notes_off()
   engine.stopAll()
+  opxy_all_notes_off()
 end
 
 -- ────────────────────────────────────────────────────────────────────────────────
@@ -559,6 +622,13 @@ function update()
       state.bar = 0
     end
     tension_arc.current_position = state.bar / tension_arc.bars_per_cycle
+    
+    -- Send tension-mapped CCs to OP-XY voices
+    local tension_val = tension_arc.current_position
+    opxy_cc("bass", 32, util.linlin(0, 1, 40, 120, tension_val))      -- Filter cutoff
+    opxy_cc("bass", 46, util.linlin(0, 1, 0, 100, tension_val))       -- Drive (tension = more drive)
+    opxy_cc("harm", 32, util.linlin(0, 1, 80, 110, tension_val))      -- Harm filter
+    opxy_cc("texture", 32, util.linlin(0, 1, 60, 127, tension_val))   -- Texture brightness
   end
 
   state.screen_dirty = true
@@ -574,6 +644,7 @@ function cleanup()
   if the_lattice then
     the_lattice:destroy()
   end
+  opxy_all_notes_off()
   if midi_out then
     for ch = 1, 16 do
       midi_out:cc(123, 0, ch)
