@@ -181,7 +181,7 @@ Engine_FM7 : CroneEngine {
   }
 
   removeVoice { arg id;
-    if(true, {
+    if(voices[id].notNil, {
       voices[id].set(\gate,0);
     });
   }
