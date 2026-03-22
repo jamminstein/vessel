@@ -732,7 +732,7 @@ end
 
 function redraw()
   screen.clear()
-  screen.aa(1)
+  screen.aa(0)
 
   -- title
   screen.level(15)
